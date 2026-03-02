@@ -80,6 +80,7 @@
 
         // --- Helper for Quantile Calculation ---
         const getQuantile = (data, q) => {
+            if (data.length === 0) return 0;
             const pos = (data.length - 1) * q;
             const base = Math.floor(pos);
             const rest = pos - base;
@@ -142,7 +143,7 @@
 
         const App = () => {
             const [data, setData] = React.useState([]);
-            const [columns, setColumns] = React.useState([]);
+            const [numericColumns, setNumericColumns] = React.useState([]);
             const [selectedY, setSelectedY] = React.useState('Total Cost');
             const fixedX = 'หัตถการ'; 
             const [loading, setLoading] = React.useState(false);
@@ -150,6 +151,12 @@
             
             const [availableXValues, setAvailableXValues] = React.useState([]);
             const [selectedXValues, setSelectedXValues] = React.useState([]);
+
+            // STRICT allowed headers list
+            const allowedHeadersList = [
+                'Total Bill', 'Total Cost', 'Medicine', 'Supply', 'Lab',
+                'Doctor Fee', 'X-Ray', 'Nutrition', 'Other VC', 'Fixed cost'
+            ];
 
             const cleanNumber = (val) => {
                 if (typeof val !== 'string') return val;
@@ -178,28 +185,31 @@
                         const { header, data: rawData } = parseCSV(text);
 
                         if (rawData.length > 0) {
+                            // Find actual column names in the CSV that match our strict list (case-insensitive, trimming whitespace)
+                            const matchedHeaders = allowedHeadersList.map(target => {
+                                return header.find(h => h.trim().toLowerCase() === target.toLowerCase()) || null;
+                            }).filter(h => h !== null);
+
+                            if (matchedHeaders.length === 0) {
+                                setError("ไม่พบคอลัมน์ที่ต้องการในไฟล์ (เช่น Total Cost, Total Bill, ฯลฯ)");
+                                setLoading(false);
+                                return;
+                            }
+
                             const processedData = rawData.map(row => {
                                 const newRow = { ...row };
-                                header.forEach(col => {
-                                    const lowerCol = col.toLowerCase();
-                                    if (
-                                        lowerCol.includes('cost') || lowerCol.includes('bill') || 
-                                        lowerCol.includes('ราคา') || lowerCol.includes('ค่าใช้จ่าย') ||
-                                        lowerCol.includes('medicine') || lowerCol.includes('supply') ||
-                                        lowerCol.includes('lab') || lowerCol.includes('fee') ||
-                                        lowerCol.includes('x-ray')
-                                    ) {
-                                        newRow[col] = cleanNumber(row[col]);
-                                    }
+                                matchedHeaders.forEach(col => {
+                                    newRow[col] = cleanNumber(row[col]);
                                 });
                                 return newRow;
                             });
 
                             setData(processedData);
-                            setColumns(header);
+                            setNumericColumns(matchedHeaders);
                             
-                            const hasTotalCost = header.find(h => h.includes('Total Cost'));
-                            if (hasTotalCost) setSelectedY(hasTotalCost);
+                            // Auto-select Total Cost if available
+                            const defaultY = matchedHeaders.find(h => h.trim().toLowerCase() === 'total cost') || matchedHeaders[0];
+                            setSelectedY(defaultY);
                             
                             const uniqueProcs = Array.from(new Set(processedData.map(d => d[fixedX] || 'ไม่ระบุ')))
                                 .filter(Boolean)
@@ -239,7 +249,6 @@
                 return data.filter(row => selectedXValues.includes(row[fixedX] || 'ไม่ระบุ'));
             }, [data, selectedXValues]);
 
-            // --- Generate Summary Data for Table ---
             const summaryData = React.useMemo(() => {
                 if (!filteredData.length || !selectedY) return [];
                 
@@ -320,7 +329,7 @@
                 }));
 
                 window.Plotly.newPlot('my-plot', traces, {
-                    title: { text: `การกระจายตัวของ ${selectedY} แยกตาม ${fixedX}`, font: { size: 16 } },
+                    title: { text: `การกระจายตัวของ ${selectedY}`, font: { size: 16 } },
                     margin: { t: 80, b: 120, l: 80, r: 20 },
                     yaxis: { tickformat: ',.0f', title: 'จำนวนเงิน' },
                     xaxis: { tickangle: -45, automargin: true },
@@ -407,9 +416,9 @@
                                                 <span>ข้อมูลที่วิเคราะห์</span>
                                             </div>
                                             <div className="space-y-2">
-                                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">แกน Y (ตัวเลขค่าใช้จ่าย)</label>
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">เลือกตัวแปรต้นทุน (Y)</label>
                                                 <select value={selectedY} onChange={(e) => setSelectedY(e.target.value)} className="w-full bg-slate-50 border rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer font-medium">
-                                                    {columns.map((col, idx) => <option key={`y-${idx}`} value={col}>{col}</option>)}
+                                                    {numericColumns.map((col, idx) => <option key={`y-${idx}`} value={col}>{col}</option>)}
                                                 </select>
                                             </div>
                                         </div>
@@ -418,7 +427,7 @@
                                             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
                                                 <div className="flex items-center gap-2 font-bold text-slate-800 border-b pb-3">
                                                     <FilterIcon size={18} className="text-indigo-600" />
-                                                    <span>เลือกหัตถการ (X-Axis)</span>
+                                                    <span>เลือกหัตถการ</span>
                                                 </div>
                                                 <div className="flex gap-2">
                                                     <button onClick={() => setSelectedXValues(availableXValues)} className="text-[10px] bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded font-bold text-slate-600">ทั้งหมด</button>
@@ -447,11 +456,11 @@
                                             <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-xl space-y-5">
                                                 <div className="flex items-center gap-2 font-bold border-b border-white/10 pb-3">
                                                     <LayoutPanelLeft size={18} className="text-blue-400" />
-                                                    <span>สถิติรวมทุกกลุ่มที่เลือก</span>
+                                                    <span>สถิติรวมกลุ่มที่เลือก</span>
                                                 </div>
                                                 <div className="space-y-4">
                                                     <div className="bg-white/5 p-4 rounded-xl border border-white/5">
-                                                        <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">เฉลี่ยรวม (Grand Mean)</p>
+                                                        <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">เฉลี่ยรวม</p>
                                                         <p className="text-2xl font-black text-blue-400">฿{globalStats.avg.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
                                                     </div>
                                                     <div className="bg-white/5 p-4 rounded-xl border border-white/5">
@@ -459,7 +468,7 @@
                                                         <p className="text-2xl font-black text-white">฿{globalStats.median.toLocaleString()}</p>
                                                     </div>
                                                     <div className="bg-white/5 p-4 rounded-xl border border-white/5">
-                                                        <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">จำนวนเคสทั้งหมด</p>
+                                                        <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">จำนวนเคส</p>
                                                         <p className="text-2xl font-black text-slate-300">{globalStats.count.toLocaleString()}</p>
                                                     </div>
                                                 </div>
@@ -478,7 +487,7 @@
                                         )}
                                         <div className="mt-4 pt-4 border-t border-slate-50 text-[10px] text-slate-400 flex justify-between items-center px-2 font-medium">
                                             <span className="italic flex items-center gap-1">
-                                                แสดงค่า Quartiles และ Outliers ของแต่ละหัตถการ
+                                                เปรียบเทียบค่าสถิติ 5 ตัว (Min, Q1, Median, Q3, Max)
                                             </span>
                                             <span className="bg-slate-50 px-2 py-1 rounded text-blue-500 uppercase tracking-widest text-[8px]">Grouped Statistic View</span>
                                         </div>
@@ -493,8 +502,8 @@
                                                 <TableIcon size={22} />
                                             </div>
                                             <div>
-                                                <h2 className="text-xl font-bold text-slate-800 tracking-tight">ตารางสรุปสถิติแยกตามหัตถการ</h2>
-                                                <p className="text-xs text-slate-400 font-medium">เปรียบเทียบค่า Max, Median, Min และค่าสถิติสำคัญอื่นๆ ของ {selectedY}</p>
+                                                <h2 className="text-xl font-bold text-slate-800 tracking-tight">ตารางสถิติสรุปค่า {selectedY}</h2>
+                                                <p className="text-xs text-slate-400 font-medium">ตารางสรุปตัวเลขสถิติพื้นฐานแยกตามรายหัตถการ</p>
                                             </div>
                                         </div>
                                     </div>
@@ -504,13 +513,13 @@
                                             <thead>
                                                 <tr className="bg-slate-50">
                                                     <th className="px-5 py-4 font-bold text-indigo-700 text-xs uppercase tracking-wider border-b whitespace-nowrap">หัตถการ</th>
-                                                    <th className="px-5 py-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b text-center whitespace-nowrap">จำนวนเคส</th>
-                                                    <th className="px-5 py-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap">ต่ำสุด (Min)</th>
+                                                    <th className="px-5 py-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b text-center whitespace-nowrap">Count</th>
+                                                    <th className="px-5 py-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap">Min</th>
                                                     <th className="px-5 py-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap">Q1</th>
-                                                    <th className="px-5 py-4 font-bold text-blue-700 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap bg-blue-50/30">มัธยฐาน (Median)</th>
+                                                    <th className="px-5 py-4 font-bold text-blue-700 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap bg-blue-50/30">Median</th>
                                                     <th className="px-5 py-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap">Q3</th>
-                                                    <th className="px-5 py-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap">สูงสุด (Max)</th>
-                                                    <th className="px-5 py-4 font-bold text-emerald-700 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap bg-emerald-50/20">เฉลี่ย (Mean)</th>
+                                                    <th className="px-5 py-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap">Max</th>
+                                                    <th className="px-5 py-4 font-bold text-emerald-700 text-xs uppercase tracking-wider border-b text-right whitespace-nowrap bg-emerald-50/20">Mean</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -530,16 +539,12 @@
                                                 ) : (
                                                     <tr>
                                                         <td colSpan="8" className="py-12 text-center text-slate-400 text-sm italic">
-                                                            กรุณาเลือกหัตถการเพื่อสรุปสถิติ
+                                                            กรุณาอัปโหลดไฟล์ที่ถูกต้องเพื่อแสดงผลสถิติ
                                                         </td>
                                                     </tr>
                                                 )}
                                             </tbody>
                                         </table>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-[10px] text-slate-400 px-1">
-                                        <Info size={12} />
-                                        <span>ค่า Quartile (Q1, Q3) คำนวณโดยใช้ Linear Interpolation เพื่อความแม่นยำทางสถิติ</span>
                                     </div>
                                 </div>
                             </>
